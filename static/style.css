@@ -1,0 +1,82 @@
+:root {
+  --bg: #ffffff;
+  --card: #f3f3f5;
+  --text: #111111;
+  --hint: #6d6d72;
+  --accent: #3390ec;
+  --accent-text: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+h2 { margin: 4px 0 16px; font-size: 1.25rem; }
+
+.hint { color: var(--hint); font-size: 0.9rem; }
+.error { color: #d84a4a; }
+
+form { display: flex; flex-direction: column; gap: 10px; }
+
+label { font-size: 0.85rem; color: var(--hint); margin-top: 6px; }
+
+input, textarea, select {
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d8d8dc;
+  background: var(--card);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button.secondary {
+  background: var(--card);
+  color: var(--text);
+}
+
+.menu { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+
+.wishes { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+
+.wish-card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.wish-title { font-weight: 600; margin-bottom: 4px; }
+.wish-meta { font-size: 0.8rem; color: var(--hint); margin-bottom: 8px; }
+
+.wish-actions { display: flex; gap: 6px; }
+.wish-actions button {
+  flex: 1;
+  padding: 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #d8d8dc;
+}
+
+.invite-box {
+  background: var(--card);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.85rem;
+  word-break: break-all;
+  margin-bottom: 12px;
+}

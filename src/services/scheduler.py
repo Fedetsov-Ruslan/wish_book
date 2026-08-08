@@ -2,11 +2,21 @@
 Delayed notification scheduler backed by Redis.
 
 Redis key : notify:{user_id}:{wish_id}
-Redis value: JSON { wish_id, user_id, partner_tg_id, author_name, send_at }
+Redis value: JSON { wish_id, user_id, partner_tg_id, author_name, send_at, status }
 TTL        : delay + 1 h (safety net if the process crashes mid-task)
 
+``status`` tracks delivery so a crash or a blocked partner doesn't just
+vanish silently:
+  pending -> sent      (delivered; key is deleted immediately)
+  pending -> blocked   (partner blocked/never started the bot; key kept
+                        until TTL for inspection, not retried)
+  pending -> failed    (unexpected error sending; key kept until TTL,
+                        not retried)
+
 Call ``await scheduler.restore()`` once at startup to recreate asyncio
-tasks for any pending keys that survived an application restart.
+tasks for any *pending* keys that survived an application restart. Keys
+already resolved (sent/blocked/failed) are left alone — they're just the
+audit trail until their TTL expires.
 """
 
 import asyncio
@@ -22,6 +32,13 @@ from src.services.notification import notify_partner_new_wish
 logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "notify"
+
+
+class NotificationStatus:
+    PENDING = "pending"
+    SENT = "sent"
+    BLOCKED = "blocked"
+    FAILED = "failed"
 
 
 class NotificationScheduler:
@@ -53,6 +70,7 @@ class NotificationScheduler:
             "partner_tg_id": partner_tg_id,
             "author_name": author_name,
             "send_at": send_at.isoformat(),
+            "status": NotificationStatus.PENDING,
         })
         await self.redis.set(redis_key, payload, ex=self.delay + 3600)
 
@@ -87,6 +105,7 @@ class NotificationScheduler:
 
         now = datetime.now(timezone.utc)
         restored = 0
+        skipped_resolved = 0
 
         for key in keys:
             raw = await self.redis.get(key)
@@ -94,6 +113,14 @@ class NotificationScheduler:
                 continue
             try:
                 data = json.loads(raw)
+
+                # Already resolved before the crash (sent/blocked/failed) —
+                # it's just an audit-trail leftover until TTL, not a retry
+                # candidate.
+                if data.get("status", NotificationStatus.PENDING) != NotificationStatus.PENDING:
+                    skipped_resolved += 1
+                    continue
+
                 wish_id: int = data["wish_id"]
                 partner_tg_id: int = data["partner_tg_id"]
                 author_name: str = data["author_name"]
@@ -118,7 +145,9 @@ class NotificationScheduler:
                 )
 
         logger.info(
-            "Restored %d pending notification(s) from Redis", restored
+            "Restored %d pending notification(s) from Redis (%d already resolved)",
+            restored,
+            skipped_resolved,
         )
 
     # ── Internal task ─────────────────────────────────────────────────────
@@ -133,16 +162,34 @@ class NotificationScheduler:
     ) -> None:
         try:
             await asyncio.sleep(delay)
-            await notify_partner_new_wish(self.bot, partner_tg_id, author_name)
-            await self.redis.delete(redis_key)
-            self._tasks.pop(wish_id, None)
-            self._keys.pop(wish_id, None)
-            logger.info(
-                "Notification sent and cleaned up: wish_id=%d", wish_id
-            )
+            status = await notify_partner_new_wish(self.bot, partner_tg_id, author_name)
+            await self._resolve(wish_id, redis_key, status)
         except asyncio.CancelledError:
             pass  # cancelled via cancel(); Redis key already deleted there
         except Exception as exc:
             logger.error(
-                "Notification task failed: wish_id=%d error=%s", wish_id, exc
+                "Notification task failed unexpectedly: wish_id=%d error=%s", wish_id, exc
             )
+            await self._resolve(wish_id, redis_key, NotificationStatus.FAILED)
+
+    async def _resolve(self, wish_id: int, redis_key: str, status: str) -> None:
+        """Record the final delivery status and drop the in-memory task handle."""
+        self._tasks.pop(wish_id, None)
+        self._keys.pop(wish_id, None)
+
+        if status == NotificationStatus.SENT:
+            await self.redis.delete(redis_key)
+            logger.info("Notification sent and cleaned up: wish_id=%d", wish_id)
+            return
+
+        # Not delivered — keep the record (with its existing TTL) so the
+        # failure/blocked state is inspectable instead of silently lost.
+        raw = await self.redis.get(redis_key)
+        if raw:
+            data = json.loads(raw)
+            data["status"] = status
+            ttl = await self.redis.ttl(redis_key)
+            await self.redis.set(redis_key, json.dumps(data), ex=ttl if ttl and ttl > 0 else None)
+        logger.warning(
+            "Notification not delivered: wish_id=%d status=%s", wish_id, status
+        )

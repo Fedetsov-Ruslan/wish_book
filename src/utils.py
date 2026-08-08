@@ -1,27 +1,11 @@
-import asyncio
-import logging
-
-from aiogram.types import Message
-
-logger = logging.getLogger(__name__)
+import html
 
 
-def delete_after(message: Message, delay: float = 5.0) -> None:
-    """Schedule a message for deletion after `delay` seconds (fire-and-forget)."""
-    asyncio.create_task(_do_delete(message, delay))
-
-
-async def safe_delete(message: Message) -> None:
-    """Delete a message immediately, ignoring errors (e.g. already deleted)."""
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-
-async def _do_delete(message: Message, delay: float) -> None:
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except Exception:
-        pass
+def escape_html(text: str) -> str:
+    """
+    Escape user-supplied text before interpolating it into a parse_mode="HTML"
+    message. Telegram's HTML parser rejects malformed/unexpected tags, and
+    unescaped input would also let one user inject markup/links into a
+    message rendered on their partner's device.
+    """
+    return html.escape(text, quote=False)

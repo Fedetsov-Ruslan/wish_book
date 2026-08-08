@@ -48,12 +48,3 @@ class UserRepository:
             partner_tg_id,
             tg_id,
         )
-
-    async def find_waiting_for(self, tg_id: int) -> Optional[User]:
-        """Return a user who registered with partner_tg_id == tg_id but is not yet linked back."""
-        row = await self.db.fetchrow(
-            "SELECT id, tg_id, name, partner_tg_id, created_at "
-            "FROM users WHERE partner_tg_id = $1 LIMIT 1",
-            tg_id,
-        )
-        return _row_to_user(row) if row else None

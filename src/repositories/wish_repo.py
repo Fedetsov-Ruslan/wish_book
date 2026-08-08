@@ -57,6 +57,20 @@ class WishRepository:
         row = await self.db.fetchrow(f"{_SELECT} WHERE id = $1", wish_id)
         return _row_to_wish(row) if row else None
 
+    async def get_owned(self, wish_id: int, user_id: int) -> Optional[Wish]:
+        """Like get_by_id, but only returns the row if it belongs to user_id.
+
+        Use this (never get_by_id) when the caller is a specific user acting
+        on a wish_id that came from client input (callback_data) — wish_id is
+        a sequential int and callback_data is not authenticated, so every
+        read/write reachable from a handler must be scoped to the acting
+        user's own rows.
+        """
+        row = await self.db.fetchrow(
+            f"{_SELECT} WHERE id = $1 AND user_id = $2", wish_id, user_id
+        )
+        return _row_to_wish(row) if row else None
+
     async def get_my_wishes(self, user_id: int) -> List[Wish]:
         rows = await self.db.fetch(
             f"{_SELECT} WHERE user_id = $1 ORDER BY created_at DESC",
@@ -78,33 +92,64 @@ class WishRepository:
         )
         return [_row_to_wish(r) for r in rows]
 
-    async def update_title(self, wish_id: int, title: str) -> None:
-        await self.db.execute(
-            "UPDATE wishes SET title = $1 WHERE id = $2", encrypt(title), wish_id
-        )
+    # All mutating methods below take `user_id` and scope the query to it
+    # (WHERE id = $1 AND user_id = $2 ... RETURNING id). They return True
+    # only if a row actually matched — i.e. the wish exists AND belongs to
+    # that user. wish_id alone is never sufficient to authorize a write.
 
-    async def update_visibility(self, wish_id: int, visibility: str) -> None:
-        await self.db.execute(
-            "UPDATE wishes SET visibility = $1 WHERE id = $2", visibility, wish_id
+    async def update_title(self, wish_id: int, user_id: int, title: str) -> bool:
+        result = await self.db.fetchval(
+            "UPDATE wishes SET title = $1 WHERE id = $2 AND user_id = $3 RETURNING id",
+            encrypt(title),
+            wish_id,
+            user_id,
         )
+        return result is not None
 
-    async def update_deadline(self, wish_id: int, deadline: str, deadline_date: datetime) -> None:
-        await self.db.execute(
-            "UPDATE wishes SET deadline = $1, deadline_date = $2 WHERE id = $3",
+    async def update_visibility(self, wish_id: int, user_id: int, visibility: str) -> bool:
+        result = await self.db.fetchval(
+            "UPDATE wishes SET visibility = $1 WHERE id = $2 AND user_id = $3 RETURNING id",
+            visibility,
+            wish_id,
+            user_id,
+        )
+        return result is not None
+
+    async def update_deadline(
+        self, wish_id: int, user_id: int, deadline: str, deadline_date: datetime
+    ) -> bool:
+        result = await self.db.fetchval(
+            "UPDATE wishes SET deadline = $1, deadline_date = $2 "
+            "WHERE id = $3 AND user_id = $4 RETURNING id",
             deadline,
             deadline_date,
             wish_id,
+            user_id,
         )
+        return result is not None
 
-    async def toggle_completed(self, wish_id: int) -> None:
-        await self.db.execute(
-            "UPDATE wishes SET is_completed = NOT is_completed WHERE id = $1", wish_id
+    async def toggle_completed(self, wish_id: int, user_id: int) -> bool:
+        result = await self.db.fetchval(
+            "UPDATE wishes SET is_completed = NOT is_completed "
+            "WHERE id = $1 AND user_id = $2 RETURNING id",
+            wish_id,
+            user_id,
         )
+        return result is not None
 
-    async def toggle_hidden(self, wish_id: int) -> None:
-        await self.db.execute(
-            "UPDATE wishes SET is_hidden = NOT is_hidden WHERE id = $1", wish_id
+    async def toggle_hidden(self, wish_id: int, user_id: int) -> bool:
+        result = await self.db.fetchval(
+            "UPDATE wishes SET is_hidden = NOT is_hidden "
+            "WHERE id = $1 AND user_id = $2 RETURNING id",
+            wish_id,
+            user_id,
         )
+        return result is not None
 
-    async def delete(self, wish_id: int) -> None:
-        await self.db.execute("DELETE FROM wishes WHERE id = $1", wish_id)
+    async def delete(self, wish_id: int, user_id: int) -> bool:
+        result = await self.db.fetchval(
+            "DELETE FROM wishes WHERE id = $1 AND user_id = $2 RETURNING id",
+            wish_id,
+            user_id,
+        )
+        return result is not None

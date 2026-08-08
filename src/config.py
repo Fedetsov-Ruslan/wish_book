@@ -13,6 +13,11 @@ class Config(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
     NOTIFICATION_DELAY_SECONDS: int = 300  # 5 minutes; change freely in .env
 
+    # Public HTTPS origin the Mini App is served from (Telegram requires TLS).
+    # Used both as the bot's persistent Menu Button target and as the base
+    # for any absolute links the frontend needs to build (e.g. invite links).
+    WEBAPP_URL: str = "https://wish-book-bot.isgood.host"
+
     # Fernet symmetric key — generate with:
     # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     ENCRYPTION_KEY: str

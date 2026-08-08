@@ -11,8 +11,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # no host port published — only reachable from other containers (caddy)
+    # on the compose network, at bot:8000
+
+  caddy:
+    container_name: caddy
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - bot
     ports:
-      - 80:3000
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   postgres:
     container_name: db
@@ -47,3 +61,5 @@ services:
 volumes:
   pgdata:
   redis_data:
+  caddy_data:
+  caddy_config:

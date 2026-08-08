@@ -6,11 +6,29 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8000:8000"  # local API/frontend access without TLS, for dev iteration only —
+                      # Telegram itself will only load the Mini App over the prod/Caddy https:// URL
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Dev-only: exposes `bot` over a free trycloudflare.com HTTPS URL so the
+  # real Telegram client can open the Mini App without deploying to the
+  # actual domain/Caddy. Reaches `bot` by its compose service name over the
+  # shared network, so recreating `bot` doesn't break the tunnel (unlike
+  # `--network container:bot`). The URL is random per start — read it with:
+  #   docker compose logs cloudflared | grep trycloudflare
+  # then set WEBAPP_URL in .env to it and re-run the menu-button setup.
+  cloudflared:
+    container_name: cloudflared
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --url http://bot:8000
+    depends_on:
+      - bot
 
   postgres:
     container_name: db
