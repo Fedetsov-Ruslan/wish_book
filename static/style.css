@@ -45,31 +45,69 @@ button {
   cursor: pointer;
 }
 
+/* Visible-but-secondary: bordered, not flat/muted, still clearly a button */
+button.outline {
+  background: var(--bg);
+  color: var(--accent);
+  border: 2px solid var(--accent);
+}
+
+/* Lowest emphasis: cancel/back actions */
 button.secondary {
   background: var(--card);
   color: var(--text);
+}
+
+/* Highest emphasis: the one primary action on a screen */
+button.btn-lg {
+  padding: 16px;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+button.danger {
+  background: #d84a4a;
+  color: #ffffff;
 }
 
 .menu { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 
 .wishes { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
 
-.wish-card {
+/* Uniform-size list rows — tap opens the single-wish detail screen */
+.wish-row {
   background: var(--card);
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px;
+  height: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
 }
 
-.wish-title { font-weight: 600; margin-bottom: 4px; }
-.wish-meta { font-size: 0.8rem; color: var(--hint); margin-bottom: 8px; }
+.wish-row-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-.wish-actions { display: flex; gap: 6px; }
-.wish-actions button {
-  flex: 1;
-  padding: 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid #d8d8dc;
+.wish-row-meta { font-size: 0.8rem; color: var(--hint); }
+
+.wish-detail {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 4px;
+}
+
+.wish-detail-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin: 0 0 10px;
+  word-break: break-word;
 }
 
 .invite-box {

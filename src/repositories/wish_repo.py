@@ -73,7 +73,7 @@ class WishRepository:
 
     async def get_my_wishes(self, user_id: int) -> List[Wish]:
         rows = await self.db.fetch(
-            f"{_SELECT} WHERE user_id = $1 ORDER BY created_at DESC",
+            f"{_SELECT} WHERE user_id = $1 ORDER BY is_completed ASC, created_at DESC",
             user_id,
         )
         return [_row_to_wish(r) for r in rows]

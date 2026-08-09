@@ -126,20 +126,26 @@ function renderMenu(me) {
   const partnerLine = me.partner
     ? `💑 Партнёр: <b>${escapeHtml(me.partner.name)}</b>`
     : '👥 Партнёр ещё не подключён';
+  // Only offer the invite flow while there's no partner yet — once
+  // connected, there's nothing left to invite.
+  const inviteBtn = me.partner
+    ? ''
+    : '<button data-go="invite" class="outline">Пригласить партнёра</button>';
   render(`
     <h2>Привет, ${escapeHtml(me.name)}!</h2>
     <p class="hint">${partnerLine}</p>
     <div class="menu">
-      <button data-go="add">➕ Добавить желание</button>
-      <button data-go="mine">📋 Мои желания</button>
-      <button data-go="partner">💝 Желания партнёра</button>
-      <button data-go="invite" class="secondary">🔗 Пригласить партнёра</button>
+      <button data-go="add" class="btn-lg">➕ Добавить желание</button>
+      <button data-go="mine" class="outline">📋 Мои желания</button>
+      <button data-go="partner" class="outline">💝 Желания партнёра</button>
+      ${inviteBtn}
     </div>
   `);
   app.querySelector('[data-go="add"]').onclick = () => renderAddWish(me);
   app.querySelector('[data-go="mine"]').onclick = () => renderWishList('mine', me);
   app.querySelector('[data-go="partner"]').onclick = () => renderWishList('partner', me);
-  app.querySelector('[data-go="invite"]').onclick = () => renderInvite(me);
+  const inviteEl = app.querySelector('[data-go="invite"]');
+  if (inviteEl) inviteEl.onclick = () => renderInvite(me);
 }
 
 // ---------- Invite / pair ----------
@@ -155,9 +161,11 @@ function renderInvite(me) {
     <p class="hint" style="margin-top:16px">Или партнёр уже пользуется ботом — введите его Telegram ID:</p>
     <form id="pair-form">
       <input name="partner_tg_id" type="number" placeholder="Telegram ID партнёра" required />
-      <button type="submit" class="secondary">Связать</button>
+      <button type="submit" class="outline">Связать</button>
     </form>
+    <button id="back-btn" class="secondary">Назад</button>
   `);
+  document.getElementById('back-btn').onclick = () => renderMenu(me);
   document.getElementById('share-btn').onclick = () => {
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Присоединяйся ко мне в WishBook!')}`;
     if (tg?.openTelegramLink) tg.openTelegramLink(shareUrl);
@@ -196,8 +204,10 @@ function renderAddWish(me) {
         <option value="shared" ${me.partner ? '' : 'disabled'}>💑 Для партнёра${me.partner ? '' : ' (нет партнёра)'}</option>
       </select>
       <button type="submit">Добавить</button>
+      <button type="button" id="cancel-btn" class="secondary">Отмена</button>
     </form>
   `);
+  document.getElementById('cancel-btn').onclick = () => renderMenu(me);
   document.getElementById('add-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -211,100 +221,120 @@ function renderAddWish(me) {
         }),
       });
       tg?.HapticFeedback?.notificationOccurred('success');
-      renderWishList('mine', me);
+      renderMenu(await api('/api/me'));
     } catch (err) {
       showError(err);
     }
   };
 }
 
-// ---------- Wish list ----------
+// ---------- Wish list (uniform rows, tap to open detail) ----------
 
 async function renderWishList(kind, me) {
   setBack(() => renderMenu(me));
   render('<p class="hint">Загрузка…</p>');
   try {
     const wishes = await api(kind === 'mine' ? '/api/wishes/mine' : '/api/wishes/partner');
-    const items = wishes.map((w) => wishCardHtml(w, kind === 'mine')).join('') || '<p class="hint">Пока пусто.</p>';
+    const items = wishes.map((w) => wishRowHtml(w)).join('') || '<p class="hint">Пока пусто.</p>';
     render(`
       <h2>${kind === 'mine' ? '📋 Мои желания' : '💝 Желания партнёра'}</h2>
       <div class="wishes">${items}</div>
+      <button id="back-btn" class="secondary">Назад</button>
     `);
-    if (kind === 'mine') wireWishActions(me);
+    document.getElementById('back-btn').onclick = () => renderMenu(me);
+    app.querySelectorAll('.wish-row').forEach((row, i) => {
+      row.onclick = () => renderWishDetail(wishes[i], kind, me);
+    });
   } catch (err) {
     showError(err);
   }
 }
 
-function wishCardHtml(w, mine) {
+function wishRowHtml(w) {
   const status = w.is_completed ? '✅' : w.is_expired ? '⌛' : '🔵';
-  const visLabel = w.visibility === 'shared' ? '💑 Общее' : '👤 Личное';
   return `
-    <div class="wish-card" data-id="${w.id}">
-      <div class="wish-title">${status} ${escapeHtml(w.title)}</div>
-      <div class="wish-meta">📅 ${escapeHtml(w.deadline_label)}${mine ? ` · ${visLabel}` : ''}</div>
-      ${
-        mine
-          ? `<div class="wish-actions">
-              <button data-act="complete">${w.is_completed ? '↩️' : '✅'}</button>
-              <button data-act="visibility">${w.visibility === 'shared' ? '🙈' : '👁'}</button>
-              <button data-act="edit">✏️</button>
-              <button data-act="delete">🗑</button>
-            </div>`
-          : ''
-      }
+    <div class="wish-row">
+      <div class="wish-row-title">${status} ${escapeHtml(w.title)}</div>
+      <div class="wish-row-meta">📅 ${escapeHtml(w.deadline_label)}</div>
     </div>
   `;
 }
 
-function wireWishActions(me) {
-  app.querySelectorAll('.wish-card').forEach((card) => {
-    const id = card.dataset.id;
+// ---------- Wish detail (single card, full actions) ----------
 
-    card.querySelector('[data-act="complete"]').onclick = () =>
-      api(`/api/wishes/${id}/complete`, { method: 'POST' })
+function renderWishDetail(wish, kind, me) {
+  setBack(() => renderWishList(kind, me));
+  const mine = kind === 'mine';
+  const status = wish.is_completed ? '✅ Выполнено' : wish.is_expired ? '⌛ Просрочено' : '🔵 Активно';
+  const visLabel = wish.visibility === 'shared' ? '💑 Общее' : '👤 Личное';
+
+  render(`
+    <h2>Желание</h2>
+    <div class="wish-detail">
+      <p class="wish-detail-title">${escapeHtml(wish.title)}</p>
+      <p class="hint">${status}</p>
+      <p class="hint">📅 ${escapeHtml(wish.deadline_label)}</p>
+      ${mine ? `<p class="hint">${visLabel}</p>` : ''}
+    </div>
+    <div class="menu">
+      ${
+        mine
+          ? `
+        <button data-act="complete">${wish.is_completed ? 'Вернуть в работу' : 'Отметить выполненным'}</button>
+        <button data-act="visibility" class="outline">${wish.visibility === 'shared' ? 'Скрыть от партнёра' : 'Показать партнёру'}</button>
+        <button data-act="edit" class="outline">Изменить текст</button>
+        <button data-act="delete" class="danger">Удалить</button>
+      `
+          : ''
+      }
+      <button id="back-btn" class="secondary">Назад</button>
+    </div>
+  `);
+  document.getElementById('back-btn').onclick = () => renderWishList(kind, me);
+  if (!mine) return;
+
+  document.querySelector('[data-act="complete"]').onclick = () =>
+    api(`/api/wishes/${wish.id}/complete`, { method: 'POST' })
+      .then(() => renderWishList('mine', me))
+      .catch(showError);
+
+  document.querySelector('[data-act="visibility"]').onclick = () =>
+    api(`/api/wishes/${wish.id}/visibility`, { method: 'POST' })
+      .then(() => renderWishList('mine', me))
+      .catch(showError);
+
+  document.querySelector('[data-act="edit"]').onclick = () => renderEditWish(wish, me);
+
+  document.querySelector('[data-act="delete"]').onclick = () => {
+    const doDelete = () =>
+      api(`/api/wishes/${wish.id}`, { method: 'DELETE' })
         .then(() => renderWishList('mine', me))
         .catch(showError);
-
-    card.querySelector('[data-act="visibility"]').onclick = () =>
-      api(`/api/wishes/${id}/visibility`, { method: 'POST' })
-        .then(() => renderWishList('mine', me))
-        .catch(showError);
-
-    card.querySelector('[data-act="delete"]').onclick = () => {
-      const doDelete = () =>
-        api(`/api/wishes/${id}`, { method: 'DELETE' })
-          .then(() => renderWishList('mine', me))
-          .catch(showError);
-      if (tg?.showConfirm) tg.showConfirm('Удалить желание?', (ok) => ok && doDelete());
-      else if (confirm('Удалить желание?')) doDelete();
-    };
-
-    card.querySelector('[data-act="edit"]').onclick = () => {
-      const title = card.querySelector('.wish-title').textContent.replace(/^\S+\s/, '');
-      renderEditWish(id, title, me);
-    };
-  });
+    if (tg?.showConfirm) tg.showConfirm('Удалить желание?', (ok) => ok && doDelete());
+    else if (confirm('Удалить желание?')) doDelete();
+  };
 }
 
 // ---------- Edit wish ----------
 
-function renderEditWish(id, currentTitle, me) {
-  setBack(() => renderWishList('mine', me));
+function renderEditWish(wish, me) {
+  setBack(() => renderWishDetail(wish, 'mine', me));
   render(`
     <h2>Изменить желание</h2>
     <form id="edit-form">
       <label>Текст</label>
-      <textarea name="title" required maxlength="2000" rows="3">${escapeHtml(currentTitle)}</textarea>
+      <textarea name="title" required maxlength="2000" rows="3">${escapeHtml(wish.title)}</textarea>
       <button type="submit">Сохранить</button>
+      <button type="button" id="cancel-btn" class="secondary">Отмена</button>
     </form>
   `);
+  document.getElementById('cancel-btn').onclick = () => renderWishDetail(wish, 'mine', me);
   document.getElementById('edit-form').onsubmit = async (e) => {
     e.preventDefault();
     const title = new FormData(e.target).get('title').trim();
     if (!title) return;
     try {
-      await api(`/api/wishes/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+      await api(`/api/wishes/${wish.id}`, { method: 'PATCH', body: JSON.stringify({ title }) });
       renderWishList('mine', me);
     } catch (err) {
       showError(err);
