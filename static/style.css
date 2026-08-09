@@ -80,23 +80,25 @@ button, .file-label {
 .wish-row {
   background: var(--card);
   border-radius: 12px;
-  padding: 14px;
-  height: 60px;
+  padding: 22px 14px;
+  height: 120px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
 }
 
 .wish-row-title {
   font-weight: 600;
-  white-space: nowrap;
+  font-size: 1.05rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.wish-row-meta { font-size: 0.8rem; color: var(--hint); }
+.wish-row-meta { font-size: 0.85rem; color: var(--hint); }
 
 .wish-detail {
   background: var(--card);
