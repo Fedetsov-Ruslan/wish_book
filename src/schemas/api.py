@@ -61,6 +61,7 @@ class WishResponse(BaseModel):
     is_completed: bool
     is_expired: bool
     created_at: str
+    attachment_url: Optional[str] = None
 
     @classmethod
     def from_wish(cls, wish: Wish) -> "WishResponse":
@@ -74,6 +75,8 @@ class WishResponse(BaseModel):
             is_completed=wish.is_completed,
             is_expired=wish.is_expired,
             created_at=wish.created_at,
+            # Our own proxy URL, never the raw MinIO object key.
+            attachment_url=f"/api/wishes/{wish.id}/attachment" if wish.attachment_key else None,
         )
 
 

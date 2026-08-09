@@ -38,6 +38,31 @@ async function api(path, options = {}) {
   return data;
 }
 
+// Fetches an auth-gated file and turns it into an object URL — plain
+// `<img src="...">` can't send our Authorization header, so attachment
+// images must be loaded this way instead of a direct URL.
+async function apiBlob(path) {
+  const res = await fetch(path, { headers: { Authorization: 'tma ' + initData } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+// Raw multipart upload — the JSON `api()` helper always sets
+// Content-Type: application/json, which is wrong for file uploads (the
+// browser must set its own multipart boundary).
+async function uploadFile(path, file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { Authorization: 'tma ' + initData },
+    body: fd,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
+  return data;
+}
+
 const app = document.getElementById('app');
 
 function render(html) {
@@ -203,6 +228,8 @@ function renderAddWish(me) {
         <option value="private">👤 Только для себя</option>
         <option value="shared" ${me.partner ? '' : 'disabled'}>💑 Для партнёра${me.partner ? '' : ' (нет партнёра)'}</option>
       </select>
+      <label>Фото или GIF (необязательно)</label>
+      <input type="file" name="attachment" accept="image/*" />
       <button type="submit">Добавить</button>
       <button type="button" id="cancel-btn" class="secondary">Отмена</button>
     </form>
@@ -211,8 +238,9 @@ function renderAddWish(me) {
   document.getElementById('add-form').onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const attachment = fd.get('attachment');
     try {
-      await api('/api/wishes', {
+      const created = await api('/api/wishes', {
         method: 'POST',
         body: JSON.stringify({
           title: fd.get('title').trim(),
@@ -220,6 +248,13 @@ function renderAddWish(me) {
           visibility: fd.get('visibility'),
         }),
       });
+      if (attachment && attachment.size > 0) {
+        try {
+          await uploadFile(`/api/wishes/${created.id}/attachment`, attachment);
+        } catch (err) {
+          showError(new Error('Желание добавлено, но фото загрузить не удалось: ' + err.message));
+        }
+      }
       tg?.HapticFeedback?.notificationOccurred('success');
       renderMenu(await api('/api/me'));
     } catch (err) {
@@ -262,6 +297,20 @@ function wishRowHtml(w) {
 
 // ---------- Wish detail (single card, full actions) ----------
 
+// Re-fetches the list and re-renders the same detail screen in place — used
+// after attachment changes so the user isn't bounced back to the list just
+// to see the photo they picked.
+async function refreshWishDetail(wishId, kind, me) {
+  try {
+    const wishes = await api(kind === 'mine' ? '/api/wishes/mine' : '/api/wishes/partner');
+    const wish = wishes.find((w) => w.id === wishId);
+    if (wish) renderWishDetail(wish, kind, me);
+    else renderWishList(kind, me);
+  } catch (err) {
+    showError(err);
+  }
+}
+
 function renderWishDetail(wish, kind, me) {
   setBack(() => renderWishList(kind, me));
   const mine = kind === 'mine';
@@ -271,6 +320,7 @@ function renderWishDetail(wish, kind, me) {
   render(`
     <h2>Желание</h2>
     <div class="wish-detail">
+      ${wish.attachment_url ? '<img class="wish-attachment" data-attachment-img />' : ''}
       <p class="wish-detail-title">${escapeHtml(wish.title)}</p>
       <p class="hint">${status}</p>
       <p class="hint">📅 ${escapeHtml(wish.deadline_label)}</p>
@@ -283,7 +333,12 @@ function renderWishDetail(wish, kind, me) {
         <button data-act="complete">${wish.is_completed ? 'Вернуть в работу' : 'Отметить выполненным'}</button>
         <button data-act="visibility" class="outline">${wish.visibility === 'shared' ? 'Скрыть от партнёра' : 'Показать партнёру'}</button>
         <button data-act="edit" class="outline">Изменить текст</button>
-        <button data-act="delete" class="danger">Удалить</button>
+        <label class="file-label outline">
+          ${wish.attachment_url ? 'Заменить фото' : 'Добавить фото'}
+          <input type="file" id="attachment-input" accept="image/*" hidden />
+        </label>
+        ${wish.attachment_url ? '<button data-act="remove-attachment" class="outline">Удалить фото</button>' : ''}
+        <button data-act="delete" class="danger">Удалить желание</button>
       `
           : ''
       }
@@ -291,6 +346,16 @@ function renderWishDetail(wish, kind, me) {
     </div>
   `);
   document.getElementById('back-btn').onclick = () => renderWishList(kind, me);
+
+  if (wish.attachment_url) {
+    const img = document.querySelector('[data-attachment-img]');
+    apiBlob(wish.attachment_url)
+      .then((url) => {
+        img.src = url;
+      })
+      .catch(() => {});
+  }
+
   if (!mine) return;
 
   document.querySelector('[data-act="complete"]').onclick = () =>
@@ -304,6 +369,25 @@ function renderWishDetail(wish, kind, me) {
       .catch(showError);
 
   document.querySelector('[data-act="edit"]').onclick = () => renderEditWish(wish, me);
+
+  document.getElementById('attachment-input').onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      await uploadFile(`/api/wishes/${wish.id}/attachment`, file);
+      refreshWishDetail(wish.id, 'mine', me);
+    } catch (err) {
+      showError(err);
+    }
+  };
+
+  const removeBtn = document.querySelector('[data-act="remove-attachment"]');
+  if (removeBtn) {
+    removeBtn.onclick = () =>
+      api(`/api/wishes/${wish.id}/attachment`, { method: 'DELETE' })
+        .then(() => refreshWishDetail(wish.id, 'mine', me))
+        .catch(showError);
+  }
 
   document.querySelector('[data-act="delete"]').onclick = () => {
     const doDelete = () =>

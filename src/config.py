@@ -18,6 +18,14 @@ class Config(BaseSettings):
     # for any absolute links the frontend needs to build (e.g. invite links).
     WEBAPP_URL: str = "https://wish-book-bot.isgood.host"
 
+    # Self-hosted MinIO (S3-compatible) for wish attachments. Internal to the
+    # docker network — never exposed publicly, the backend proxies access.
+    MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_ACCESS_KEY: str = "wishbook"
+    MINIO_SECRET_KEY: str = "changeme"
+    MINIO_BUCKET: str = "wishbook-attachments"
+    MINIO_SECURE: bool = False
+
     # Fernet symmetric key — generate with:
     # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     ENCRYPTION_KEY: str

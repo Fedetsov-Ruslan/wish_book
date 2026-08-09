@@ -14,6 +14,28 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  minio:
+    container_name: minio
+    image: minio/minio:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"  # dev-only convenience — not published in prod
+      - "9001:9001"  # MinIO console, dev-only
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Dev-only: exposes `bot` over a free trycloudflare.com HTTPS URL so the
   # real Telegram client can open the Mini App without deploying to the
@@ -63,3 +85,4 @@ services:
 volumes:
   pgdata:
   redis_data:
+  minio_data:

@@ -1,5 +1,8 @@
+import uuid
+
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from src.repositories.user_repo import UserRepository
 from src.repositories.wish_repo import WishRepository
@@ -11,12 +14,17 @@ from src.schemas.api import (
     WishResponse,
     WishUpdateRequest,
 )
+from src.schemas.wish import Wish
+from src.services import storage
 from src.services.deadline import compute_deadline_date
 from src.services.scheduler import NotificationScheduler
 from src.webapp.auth import get_tg_id
 from src.webapp.deps import get_db, get_scheduler
 
 router = APIRouter(prefix="/api", tags=["wishes"])
+
+_ALLOWED_ATTACHMENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
 def _check_deadline(deadline: str) -> None:
@@ -29,6 +37,29 @@ async def _require_user_id(db: asyncpg.Connection, tg_id: int) -> int:
     if not user:
         raise HTTPException(status_code=404, detail="Register first")
     return user.id
+
+
+async def _get_visible_wish(db: asyncpg.Connection, tg_id: int, wish_id: int) -> Wish:
+    """Owner always; partner only if the wish currently satisfies the same
+    predicate as the partner wish list (shared, not hidden/completed/expired)."""
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_tg_id(tg_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Register first")
+
+    wish_repo = WishRepository(db)
+    wish = await wish_repo.get_owned(wish_id, user.id)
+    if wish:
+        return wish
+
+    if user.partner_tg_id:
+        partner = await user_repo.get_by_tg_id(user.partner_tg_id)
+        if partner:
+            wish = await wish_repo.get_visible_to_partner(wish_id, partner.id)
+            if wish:
+                return wish
+
+    raise HTTPException(status_code=404, detail="Wish not found")
 
 
 @router.get("/meta/deadline-options", response_model=list[DeadlineOption])
@@ -185,6 +216,82 @@ async def delete_wish(
     scheduler: NotificationScheduler = Depends(get_scheduler),
 ) -> None:
     user_id = await _require_user_id(db, tg_id)
-    if not await WishRepository(db).delete(wish_id, user_id):
+    deleted, attachment_key = await WishRepository(db).delete(wish_id, user_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="Wish not found")
+    if attachment_key:
+        await storage.delete(attachment_key)
     await scheduler.cancel(wish_id)
+
+
+@router.post("/wishes/{wish_id}/attachment", response_model=WishResponse)
+async def upload_attachment(
+    wish_id: int,
+    file: UploadFile,
+    tg_id: int = Depends(get_tg_id),
+    db: asyncpg.Connection = Depends(get_db),
+) -> WishResponse:
+    user_id = await _require_user_id(db, tg_id)
+    wish_repo = WishRepository(db)
+    wish = await wish_repo.get_owned(wish_id, user_id)
+    if not wish:
+        raise HTTPException(status_code=404, detail="Wish not found")
+
+    content_type = file.content_type or ""
+    if content_type not in _ALLOWED_ATTACHMENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type: {content_type!r}. Allowed: image/jpeg, image/png, image/webp, image/gif",
+        )
+
+    data = await file.read(_MAX_ATTACHMENT_BYTES + 1)
+    if len(data) > _MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 8MB)")
+
+    new_key = f"wishes/{wish_id}/{uuid.uuid4().hex}"
+    await storage.upload(new_key, data, content_type)
+
+    old_key = wish.attachment_key
+    await wish_repo.set_attachment(wish_id, user_id, new_key)
+    if old_key:
+        await storage.delete(old_key)
+
+    updated = await wish_repo.get_owned(wish_id, user_id)
+    assert updated is not None
+    return WishResponse.from_wish(updated)
+
+
+@router.get("/wishes/{wish_id}/attachment")
+async def get_attachment(
+    wish_id: int,
+    tg_id: int = Depends(get_tg_id),
+    db: asyncpg.Connection = Depends(get_db),
+) -> Response:
+    wish = await _get_visible_wish(db, tg_id, wish_id)
+    if not wish.attachment_key:
+        raise HTTPException(status_code=404, detail="No attachment")
+
+    try:
+        data, content_type = await storage.download(wish.attachment_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No attachment")
+
+    return Response(content=data, media_type=content_type)
+
+
+@router.delete("/wishes/{wish_id}/attachment", status_code=204)
+async def delete_attachment(
+    wish_id: int,
+    tg_id: int = Depends(get_tg_id),
+    db: asyncpg.Connection = Depends(get_db),
+) -> None:
+    user_id = await _require_user_id(db, tg_id)
+    wish_repo = WishRepository(db)
+    wish = await wish_repo.get_owned(wish_id, user_id)
+    if not wish:
+        raise HTTPException(status_code=404, detail="Wish not found")
+    if not wish.attachment_key:
+        raise HTTPException(status_code=404, detail="No attachment")
+
+    await storage.delete(wish.attachment_key)
+    await wish_repo.set_attachment(wish_id, user_id, None)

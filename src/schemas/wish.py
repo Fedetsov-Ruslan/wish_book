@@ -14,6 +14,7 @@ class Wish:
     is_completed: bool
     is_hidden: bool
     created_at: str
+    attachment_key: Optional[str] = None
 
     @property
     def is_expired(self) -> bool:

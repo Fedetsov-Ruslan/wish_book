@@ -6,3 +6,5 @@ redis==5.2.1
 cryptography==44.0.3
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
+python-multipart==0.0.32
+minio==7.2.20

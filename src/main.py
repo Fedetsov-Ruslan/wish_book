@@ -13,6 +13,7 @@ from starlette.responses import Response
 from src.api import users, wishes
 from src.config import config
 from src.database import create_pool, init_db
+from src.services import storage
 from src.services.scheduler import NotificationScheduler
 
 logging.basicConfig(
@@ -46,6 +47,7 @@ class NoCacheStaticFiles(StaticFiles):
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool: asyncpg.Pool = await create_pool()
     await init_db(pool)
+    await storage.ensure_bucket()
 
     redis: Redis = Redis.from_url(config.REDIS_URL, decode_responses=True)
     bot = Bot(token=config.BOT_TOKEN)

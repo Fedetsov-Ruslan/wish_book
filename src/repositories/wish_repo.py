@@ -18,12 +18,13 @@ def _row_to_wish(row: asyncpg.Record) -> Wish:
         is_completed=row["is_completed"],
         is_hidden=row["is_hidden"],
         created_at=str(row["created_at"]),
+        attachment_key=row["attachment_key"],
     )
 
 
 _SELECT = (
     "SELECT id, user_id, title, deadline, deadline_date, "
-    "visibility, is_completed, is_hidden, created_at "
+    "visibility, is_completed, is_hidden, created_at, attachment_key "
     "FROM wishes"
 )
 
@@ -77,6 +78,25 @@ class WishRepository:
             user_id,
         )
         return [_row_to_wish(r) for r in rows]
+
+    async def get_visible_to_partner(self, wish_id: int, partner_user_id: int) -> Optional[Wish]:
+        """Single-row version of get_partner_wishes's predicate.
+
+        Used to authorize attachment downloads for a partner without
+        fetching+scanning the whole list for one id.
+        """
+        row = await self.db.fetchrow(
+            f"{_SELECT} "
+            "WHERE id = $1 "
+            "  AND user_id = $2 "
+            "  AND visibility    = 'shared' "
+            "  AND is_hidden     = FALSE "
+            "  AND is_completed  = FALSE "
+            "  AND (deadline_date IS NULL OR deadline_date > NOW())",
+            wish_id,
+            partner_user_id,
+        )
+        return _row_to_wish(row) if row else None
 
     async def get_partner_wishes(self, partner_user_id: int) -> List[Wish]:
         """Active shared visible wishes: not completed, not hidden, not expired."""
@@ -146,10 +166,29 @@ class WishRepository:
         )
         return result is not None
 
-    async def delete(self, wish_id: int, user_id: int) -> bool:
+    async def set_attachment(self, wish_id: int, user_id: int, key: Optional[str]) -> bool:
         result = await self.db.fetchval(
-            "DELETE FROM wishes WHERE id = $1 AND user_id = $2 RETURNING id",
+            "UPDATE wishes SET attachment_key = $1 WHERE id = $2 AND user_id = $3 RETURNING id",
+            key,
             wish_id,
             user_id,
         )
         return result is not None
+
+    async def delete(self, wish_id: int, user_id: int) -> tuple[bool, Optional[str]]:
+        """Returns (deleted, attachment_key).
+
+        Uses fetchrow (not fetchval) deliberately: a deleted wish with no
+        attachment has attachment_key IS NULL, which is just as falsy as "no
+        row matched" — fetchval alone can't tell those two cases apart, so
+        the caller needs the explicit (bool, key) pair to know whether to
+        clean up a MinIO object.
+        """
+        row = await self.db.fetchrow(
+            "DELETE FROM wishes WHERE id = $1 AND user_id = $2 RETURNING attachment_key",
+            wish_id,
+            user_id,
+        )
+        if row is None:
+            return False, None
+        return True, row["attachment_key"]

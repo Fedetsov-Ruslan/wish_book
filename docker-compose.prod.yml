@@ -11,8 +11,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     # no host port published — only reachable from other containers (caddy)
     # on the compose network, at bot:8000
+
+  minio:
+    container_name: minio
+    image: minio/minio:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    command: server /data --console-address ":9001"
+    # no host port published — only `bot` talks to it, over the internal
+    # compose network. Never expose MinIO directly to the internet.
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   caddy:
     container_name: caddy
@@ -61,5 +82,6 @@ services:
 volumes:
   pgdata:
   redis_data:
+  minio_data:
   caddy_data:
   caddy_config:

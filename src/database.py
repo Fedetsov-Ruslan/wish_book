@@ -41,3 +41,9 @@ async def init_db(pool: asyncpg.Pool) -> None:
             ALTER TABLE wishes ADD COLUMN IF NOT EXISTS
                 deadline_date TIMESTAMPTZ
         """)
+
+        # Safe migration: MinIO object key for an optional image/GIF attachment
+        await conn.execute("""
+            ALTER TABLE wishes ADD COLUMN IF NOT EXISTS
+                attachment_key TEXT
+        """)
