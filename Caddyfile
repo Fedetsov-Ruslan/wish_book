@@ -1,3 +1,6 @@
 wish-book-bot.isgood.host {
     reverse_proxy bot:8000
 }
+expense-counter.isgood.host {
+    reverse_proxy api:8000
+}
