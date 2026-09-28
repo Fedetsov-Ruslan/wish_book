@@ -1,5 +1,10 @@
 version: "3.8"
 
+networks:
+  default: {}
+  caddy_net:
+    external: true
+
 services:
   bot:
     container_name: bot
@@ -48,6 +53,9 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    network:
+      - default
+      - caddy_net
 
   postgres:
     container_name: db
